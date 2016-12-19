@@ -1,0 +1,97 @@
+---
+title: "Practical Machine Learning Course Assignment"
+author: "Jonathan Kropko"
+date: "December 19, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+The goal in this assignment is to use the data from http://groupware.les.inf.puc-rio.br/har to predict the value of `classe`, which tells us whether people are lifting barbells correctly or incorrectly.  We will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to build the predictive model.
+
+## Loading Data and Preprocessing
+We load the training and test datasets:
+```{r loaddata, cache=TRUE}
+train <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+validation <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+dim(train)
+dim(validation)
+```
+Since `train` has only 20 observations, we will hold this as a validation set and draw a new test set randomly from the `train` data.  
+```{r createtest}
+library(caret)
+set.seed(22902)
+inTrain <- createDataPartition(y=train$classe, p=.75, list=FALSE)
+training <- train[inTrain,]
+testing <- train[-inTrain,]
+table(testing$classe)
+```
+First, we need to do some preprocessing.  Many of the variables in this data are mostly or completely missing, either as `NA` or as an empty cell.  We also remove the ID variables and time stamps, keeping only the user names as a factor.  We create a function to perform these steps and apply it to the training and testing sets:
+```{r preprocess}
+prepros <- function(d){
+      r <- colSums(is.na(d)) > 0
+      g <- d[,!r]
+      h <- apply(g, 2, FUN=function(c){
+            j <- as.character(c)
+            sum(j==""|j=="#DIV/0!")
+      })
+      g <- g[,(h==0)]
+      g <- g[,-c(1:7)]
+      return(g)
+}
+training <- prepros(training)
+testing <- prepros(testing)
+```
+## Feature building
+In order to run predictive models with any kind of computational efficiency, we create 5 principal components from all of the predictor variables.
+```{r pca}
+pca <- preProcess(training[,-53], method="pca", pcaComp=5)
+train.pca <- data.frame(classe=training$classe,
+                        predict(pca, newdata=training[,-53]))
+test.pca <- data.frame(classe=testing$classe, 
+                       predict(pca, newdata=testing[,-53]))
+```
+
+## Predictive models
+In this section, we train several predictive models on the training data and measure their accuracy for the testing data. We fit random partitions, K-nearest neighbors, linear and flexible discriminant analysis, and multinomial logit models
+```{r models, cache=TRUE, results='hide'}
+modelFit.rpart <- train(classe ~ ., data=train.pca, method="rpart") 
+modelFit.knn <- train(classe ~ ., data=train.pca, method="knn") 
+modelFit.fda <- train(classe ~ ., data=train.pca, method="fda") 
+modelFit.lda <- train(classe ~ ., data=train.pca, method="lda") 
+modelFit.multinom <- train(classe ~ ., data=train.pca, method="multinom") 
+```
+We predict out of sample from each model for the testing data:
+```{r predict, results='hide'}
+p.rpart <- predict(modelFit.rpart, newdata=test.pca) 
+p.knn <- predict(modelFit.knn, newdata=test.pca) 
+p.fda <- predict(modelFit.fda, newdata=test.pca) 
+p.lda <- predict(modelFit.lda, newdata=test.pca) 
+p.multinom <- predict(modelFit.multinom, newdata=test.pca)  
+```
+And then we measure the accuracy of each prediction.  First, the accuracy of random partitions:
+```{r accrpart}
+confusionMatrix(p.rpart, test.pca$classe)
+```
+Then K nearest neighbors
+```{r accknn}
+confusionMatrix(p.knn, test.pca$classe)
+```
+Then FDA:
+```{r accfda}
+confusionMatrix(p.fda, test.pca$classe)
+```
+Then LDA:
+```{r acclda}
+confusionMatrix(p.lda, test.pca$classe)
+```
+Then multinomial logit:
+```{r accmult}
+confusionMatrix(p.multinom, test.pca$classe)
+```
+Of the five approaches, K nearest neighbors is clearly the best model.  It's accuracy is greater than 80% while all of the others are below 40%.
+
+
